@@ -1,28 +1,40 @@
 import pandas as pd
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(
-    page_title="Control P2P & Banesco",
+    page_title="Control P2P & Banesco Pro",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 st.title("⚡ Control P2P Binance & Banesco Pro")
 
-# Inicialización del almacenamiento local
-if "transacciones" not in st.session_state:
-  st.session_state["transacciones"] = pd.DataFrame(
-      columns=[
-          "Fecha",
-          "Origen",
-          "Tipo",
-          "Monto USDT",
-          "Tasa (Bs/FIAT)",
-          "Total Neto (Bs/FIAT)",
-          "Método / Banco",
-          "Referencia / Nota",
-      ]
-  )
+# Conexión con Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+
+def cargar_datos():
+  try:
+    df = conn.read(ttl="0d")
+    df = df.dropna(how="all")
+    return df
+  except Exception:
+    return pd.DataFrame(
+        columns=[
+            "Fecha",
+            "Origen",
+            "Tipo",
+            "Monto USDT",
+            "Tasa (Bs/FIAT)",
+            "Total Neto (Bs/FIAT)",
+            "Método / Banco",
+            "Referencia / Nota",
+        ]
+    )
+
+
+df_actual = cargar_datos()
 
 tab1, tab2, tab3 = st.tabs(
     ["⚡ Registro Banesco / Pago Móvil", "📥 Cargar CSV Binance", "📊 Resumen y Caja"]
@@ -59,12 +71,12 @@ with tab1:
     st.info(f"💰 Total a transferir/recibir en Bs: **{total_bs:,.2f} Bs.**")
 
     submitted = st.form_submit_button(
-        "💾 Registrar Operación", use_container_width=True
+        "💾 Registrar Operación en Google Sheets", use_container_width=True
     )
 
     if submitted:
       if monto_usdt > 0 and tasa > 0:
-        nueva_op = {
+        nueva_op = pd.DataFrame([{
             "Fecha": pd.Timestamp.now().strftime("%d/%m/%Y %H:%M"),
             "Origen": "Manual / Banesco",
             "Tipo": tipo,
@@ -73,12 +85,11 @@ with tab1:
             "Total Neto (Bs/FIAT)": total_bs,
             "Método / Banco": metodo,
             "Referencia / Nota": referencia,
-        }
-        st.session_state["transacciones"] = pd.concat(
-            [st.session_state["transacciones"], pd.DataFrame([nueva_op])],
-            ignore_index=True,
-        )
-        st.success("¡Transacción registrada exitosamente!")
+        }])
+
+        df_actualizado = pd.concat([df_actual, nueva_op], ignore_index=True)
+        conn.update(data=df_actualizado)
+        st.success("¡Transacción guardada permanentemente en Google Sheets!")
         st.rerun()
       else:
         st.error("Por favor ingresa un monto USDT y una tasa mayores a 0.")
@@ -90,7 +101,7 @@ with tab2:
   st.subheader("📥 Importar Historial de Órdenes P2P de Binance")
   st.caption(
       "Descarga tu reporte CSV de órdenes P2P desde Binance y súbelo aquí para"
-      " registrarlas automáticamente."
+      " guardarlo automáticamente en tu Google Sheets."
   )
 
   uploaded_file = st.file_uploader(
@@ -110,7 +121,6 @@ with tab2:
 
       df_raw.columns = df_raw.columns.str.strip()
 
-      # Comprobar si el CSV contiene la frase de Binance cuando no hay datos
       primer_valor = (
           str(df_raw.iloc[0, 0]) if not df_raw.empty else ""
       )
@@ -118,15 +128,13 @@ with tab2:
         st.warning(
             "⚠️ El archivo descargado de Binance no contiene operaciones"
             ' (dice: "No hay datos que coincidan con los criterios"). Vuelve a'
-            " exportarlo desde Binance seleccionando un rango de fechas donde"
-            " tengas operaciones completadas."
+            " exportarlo seleccionando un rango de fechas con operaciones."
         )
       else:
         st.write("🔍 **Vista previa del archivo cargado:**")
-        # Convertimos todo a texto para evitar errores de enteros gigantes en Arrow
         st.dataframe(df_raw.head(5).astype(str), use_container_width=True)
 
-        if st.button("🚀 Procesar e Importar Transacciones"):
+        if st.button("🚀 Procesar y Guardar en Google Sheets"):
           df_binance = pd.DataFrame()
 
           def buscar_col(lista_nombres):
@@ -136,7 +144,6 @@ with tab2:
                   return col
             return None
 
-          # 1. Fecha
           c_fecha = buscar_col(["Hora de creación", "created", "date", "fecha"])
           df_binance["Fecha"] = (
               df_raw[c_fecha].astype(str)
@@ -146,7 +153,6 @@ with tab2:
 
           df_binance["Origen"] = "Importación Binance"
 
-          # 2. Tipo (Compra / Venta)
           c_tipo = buscar_col(["Tipo de orden", "type", "side", "tipo"])
           if c_tipo:
             df_binance["Tipo"] = df_raw[c_tipo].apply(
@@ -162,7 +168,6 @@ with tab2:
           else:
             df_binance["Tipo"] = "Compra USDT"
 
-          # 3. Monto USDT
           c_monto = buscar_col(["Cantidad", "amount", "quantity", "usdt"])
           if c_monto:
             df_binance["Monto USDT"] = pd.to_numeric(
@@ -175,7 +180,6 @@ with tab2:
           else:
             df_binance["Monto USDT"] = 0.0
 
-          # 4. Tasa
           c_tasa = buscar_col(["Precio", "price", "tasa"])
           if c_tasa:
             df_binance["Tasa (Bs/FIAT)"] = pd.to_numeric(
@@ -188,7 +192,6 @@ with tab2:
           else:
             df_binance["Tasa (Bs/FIAT)"] = 0.0
 
-          # 5. Total FIAT / Bs
           c_total = buscar_col(["Precio Total", "total price", "total"])
           if c_total:
             df_binance["Total Neto (Bs/FIAT)"] = pd.to_numeric(
@@ -203,20 +206,16 @@ with tab2:
                 df_binance["Monto USDT"] * df_binance["Tasa (Bs/FIAT)"]
             )
 
-          # 6. Método / Banco
           c_metodo = buscar_col(["Tipo de Fiat", "method", "fiat"])
           df_binance["Método / Banco"] = (
               df_raw[c_metodo].astype(str) if c_metodo else "Binance P2P"
           )
           df_binance["Referencia / Nota"] = "Orden Binance"
 
-          # Unir transacciones
-          st.session_state["transacciones"] = pd.concat(
-              [st.session_state["transacciones"], df_binance],
-              ignore_index=True,
-          )
+          df_actualizado = pd.concat([df_actual, df_binance], ignore_index=True)
+          conn.update(data=df_actualizado)
           st.success(
-              f"¡Se importaron {len(df_binance)} operaciones con éxito!"
+              f"¡Se guardaron {len(df_binance)} operaciones en Google Sheets!"
           )
           st.rerun()
 
@@ -227,9 +226,17 @@ with tab2:
 # TAB 3: RESUMEN CONTABLE Y CAJA
 # ==========================================
 with tab3:
-  df = st.session_state["transacciones"]
+  df = df_actual
 
-  if not df.empty:
+  if not df.empty and len(df) > 0:
+    # Asegurar tipos numéricos para métricas
+    df["Monto USDT"] = pd.to_numeric(df["Monto USDT"], errors="coerce").fillna(
+        0.0
+    )
+    df["Total Neto (Bs/FIAT)"] = pd.to_numeric(
+        df["Total Neto (Bs/FIAT)"], errors="coerce"
+    ).fillna(0.0)
+
     compras = df[df["Tipo"] == "Compra USDT"]
     ventas = df[df["Tipo"] == "Venta USDT"]
 
@@ -248,12 +255,12 @@ with tab3:
 
     st.markdown("---")
 
-    st.subheader("📋 Historial Contable")
+    st.subheader("📋 Historial Contable (Guardado en Google Sheets)")
     st.dataframe(df.astype(str), use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        "📥 Descargar Reporte en Excel / CSV",
+        "📥 Descargar Copia Local en Excel / CSV",
         data=csv,
         file_name="Reporte_Contable_P2P.csv",
         mime="text/csv",
@@ -261,6 +268,6 @@ with tab3:
     )
   else:
     st.info(
-        "Aún no hay transacciones registradas. Utiliza la pestaña de Registro o"
+        "Aún no hay transacciones guardadas. Utiliza la pestaña de Registro o"
         " Cargar CSV para comenzar."
     )

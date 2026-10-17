@@ -101,12 +101,12 @@ with tab2:
     try:
       if uploaded_file.name.endswith(".csv"):
         try:
-          df_raw = pd.read_csv(uploaded_file, encoding="utf-8")
+          df_raw = pd.read_csv(uploaded_file, encoding="utf-8", dtype=str)
         except Exception:
           uploaded_file.seek(0)
-          df_raw = pd.read_csv(uploaded_file, encoding="latin-1")
+          df_raw = pd.read_csv(uploaded_file, encoding="latin-1", dtype=str)
       else:
-        df_raw = pd.read_excel(uploaded_file)
+        df_raw = pd.read_excel(uploaded_file, dtype=str)
 
       df_raw.columns = df_raw.columns.str.strip()
 
@@ -118,12 +118,13 @@ with tab2:
         st.warning(
             "⚠️ El archivo descargado de Binance no contiene operaciones"
             ' (dice: "No hay datos que coincidan con los criterios"). Vuelve a'
-            " exportarlo desde Binance seleccionando un rango de fechas más"
-            " amplio."
+            " exportarlo desde Binance seleccionando un rango de fechas donde"
+            " tengas operaciones completadas."
         )
       else:
         st.write("🔍 **Vista previa del archivo cargado:**")
-        st.dataframe(df_raw.head(3), use_container_width=True)
+        # Convertimos todo a texto para evitar errores de enteros gigantes en Arrow
+        st.dataframe(df_raw.head(5).astype(str), use_container_width=True)
 
         if st.button("🚀 Procesar e Importar Transacciones"):
           df_binance = pd.DataFrame()
@@ -138,7 +139,7 @@ with tab2:
           # 1. Fecha
           c_fecha = buscar_col(["Hora de creación", "created", "date", "fecha"])
           df_binance["Fecha"] = (
-              df_raw[c_fecha]
+              df_raw[c_fecha].astype(str)
               if c_fecha
               else pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
           )
@@ -205,11 +206,11 @@ with tab2:
           # 6. Método / Banco
           c_metodo = buscar_col(["Tipo de Fiat", "method", "fiat"])
           df_binance["Método / Banco"] = (
-              df_raw[c_metodo] if c_metodo else "Binance P2P"
+              df_raw[c_metodo].astype(str) if c_metodo else "Binance P2P"
           )
           df_binance["Referencia / Nota"] = "Orden Binance"
 
-          # Unir
+          # Unir transacciones
           st.session_state["transacciones"] = pd.concat(
               [st.session_state["transacciones"], df_binance],
               ignore_index=True,
@@ -248,7 +249,7 @@ with tab3:
     st.markdown("---")
 
     st.subheader("📋 Historial Contable")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df.astype(str), use_container_width=True)
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button(

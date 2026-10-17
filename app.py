@@ -100,7 +100,6 @@ with tab2:
   if uploaded_file is not None:
     try:
       if uploaded_file.name.endswith(".csv"):
-        # Intenta leer ignorando errores de codificación habituales en CSVs
         try:
           df_raw = pd.read_csv(uploaded_file, encoding="utf-8")
         except Exception:
@@ -109,122 +108,119 @@ with tab2:
       else:
         df_raw = pd.read_excel(uploaded_file)
 
-      # Limpiar espacios en los nombres de columnas
       df_raw.columns = df_raw.columns.str.strip()
 
-      st.write("🔍 **Vista previa del archivo cargado:**")
-      st.dataframe(df_raw.head(3), use_container_width=True)
-
-      if st.button("🚀 Procesar e Importar Transacciones"):
-        df_binance = pd.DataFrame()
-
-        def buscar_columna(palabras_clave):
-          for col in df_raw.columns:
-            for p in palabras_clave:
-              if p.lower() in col.lower():
-                return col
-          return None
-
-        # 1. Fecha
-        col_fecha = buscar_columna(
-            ["created", "date", "time", "fecha", "hora", "creado"]
+      # Comprobar si el CSV contiene la frase de Binance cuando no hay datos
+      primer_valor = (
+          str(df_raw.iloc[0, 0]) if not df_raw.empty else ""
+      )
+      if "No hay datos" in primer_valor or df_raw.empty:
+        st.warning(
+            "⚠️ El archivo descargado de Binance no contiene operaciones"
+            ' (dice: "No hay datos que coincidan con los criterios"). Vuelve a'
+            " exportarlo desde Binance seleccionando un rango de fechas más"
+            " amplio."
         )
-        df_binance["Fecha"] = (
-            df_raw[col_fecha]
-            if col_fecha
-            else pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
-        )
+      else:
+        st.write("🔍 **Vista previa del archivo cargado:**")
+        st.dataframe(df_raw.head(3), use_container_width=True)
 
-        df_binance["Origen"] = "Importación Binance"
+        if st.button("🚀 Procesar e Importar Transacciones"):
+          df_binance = pd.DataFrame()
 
-        # 2. Tipo (Compra / Venta)
-        col_tipo = buscar_columna(["type", "side", "tipo", "orden"])
-        if col_tipo:
-          df_binance["Tipo"] = df_raw[col_tipo].apply(
-              lambda x: (
-                  "Compra USDT"
-                  if any(
-                      k in str(x).lower()
-                      for k in ["buy", "compra", "comprar", "b"]
-                  )
-                  else "Venta USDT"
-              )
-          )
-        else:
-          df_binance["Tipo"] = "Compra USDT"
+          def buscar_col(lista_nombres):
+            for col in df_raw.columns:
+              for name in lista_nombres:
+                if name.lower() in col.lower():
+                  return col
+            return None
 
-        # 3. Monto USDT
-        col_monto = buscar_columna([
-            "amount",
-            "quantity",
-            "crypto",
-            "monto",
-            "cantidad",
-            "usdt",
-            "executed",
-        ])
-        if col_monto:
-          df_binance["Monto USDT"] = pd.to_numeric(
-              df_raw[col_monto]
-              .astype(str)
-              .str.replace(",", "")
-              .str.extract(r"([\d\.]+)")[0],
-              errors="coerce",
-          ).fillna(0.0)
-        else:
-          df_binance["Monto USDT"] = 0.0
-
-        # 4. Tasa
-        col_tasa = buscar_columna(["price", "tasa", "precio", "unit price"])
-        if col_tasa:
-          df_binance["Tasa (Bs/FIAT)"] = pd.to_numeric(
-              df_raw[col_tasa]
-              .astype(str)
-              .str.replace(",", "")
-              .str.extract(r"([\d\.]+)")[0],
-              errors="coerce",
-          ).fillna(0.0)
-        else:
-          df_binance["Tasa (Bs/FIAT)"] = 0.0
-
-        # 5. Total FIAT / Bs
-        col_total = buscar_columna(
-            ["total", "total price", "fiat", "monto total", "total fiat"]
-        )
-        if col_total:
-          df_binance["Total Neto (Bs/FIAT)"] = pd.to_numeric(
-              df_raw[col_total]
-              .astype(str)
-              .str.replace(",", "")
-              .str.extract(r"([\d\.]+)")[0],
-              errors="coerce",
-          ).fillna(0.0)
-        else:
-          df_binance["Total Neto (Bs/FIAT)"] = (
-              df_binance["Monto USDT"] * df_binance["Tasa (Bs/FIAT)"]
+          # 1. Fecha
+          c_fecha = buscar_col(["Hora de creación", "created", "date", "fecha"])
+          df_binance["Fecha"] = (
+              df_raw[c_fecha]
+              if c_fecha
+              else pd.Timestamp.now().strftime("%d/%m/%Y %H:%M")
           )
 
-        # 6. Método de pago
-        col_metodo = buscar_columna(
-            ["method", "payment", "método", "metodo", "banco", "pay"]
-        )
-        df_binance["Método / Banco"] = (
-            df_raw[col_metodo] if col_metodo else "Binance P2P"
-        )
-        df_binance["Referencia / Nota"] = "Orden Binance"
+          df_binance["Origen"] = "Importación Binance"
 
-        # Concatenar
-        st.session_state["transacciones"] = pd.concat(
-            [st.session_state["transacciones"], df_binance], ignore_index=True
-        )
-        st.success(f"¡Se importaron {len(df_binance)} operaciones con éxito!")
-        st.rerun()
+          # 2. Tipo (Compra / Venta)
+          c_tipo = buscar_col(["Tipo de orden", "type", "side", "tipo"])
+          if c_tipo:
+            df_binance["Tipo"] = df_raw[c_tipo].apply(
+                lambda x: (
+                    "Compra USDT"
+                    if any(
+                        k in str(x).lower()
+                        for k in ["buy", "compra", "comprar", "b"]
+                    )
+                    else "Venta USDT"
+                )
+            )
+          else:
+            df_binance["Tipo"] = "Compra USDT"
+
+          # 3. Monto USDT
+          c_monto = buscar_col(["Cantidad", "amount", "quantity", "usdt"])
+          if c_monto:
+            df_binance["Monto USDT"] = pd.to_numeric(
+                df_raw[c_monto]
+                .astype(str)
+                .str.replace(",", "")
+                .str.extract(r"([\d\.]+)")[0],
+                errors="coerce",
+            ).fillna(0.0)
+          else:
+            df_binance["Monto USDT"] = 0.0
+
+          # 4. Tasa
+          c_tasa = buscar_col(["Precio", "price", "tasa"])
+          if c_tasa:
+            df_binance["Tasa (Bs/FIAT)"] = pd.to_numeric(
+                df_raw[c_tasa]
+                .astype(str)
+                .str.replace(",", "")
+                .str.extract(r"([\d\.]+)")[0],
+                errors="coerce",
+            ).fillna(0.0)
+          else:
+            df_binance["Tasa (Bs/FIAT)"] = 0.0
+
+          # 5. Total FIAT / Bs
+          c_total = buscar_col(["Precio Total", "total price", "total"])
+          if c_total:
+            df_binance["Total Neto (Bs/FIAT)"] = pd.to_numeric(
+                df_raw[c_total]
+                .astype(str)
+                .str.replace(",", "")
+                .str.extract(r"([\d\.]+)")[0],
+                errors="coerce",
+            ).fillna(0.0)
+          else:
+            df_binance["Total Neto (Bs/FIAT)"] = (
+                df_binance["Monto USDT"] * df_binance["Tasa (Bs/FIAT)"]
+            )
+
+          # 6. Método / Banco
+          c_metodo = buscar_col(["Tipo de Fiat", "method", "fiat"])
+          df_binance["Método / Banco"] = (
+              df_raw[c_metodo] if c_metodo else "Binance P2P"
+          )
+          df_binance["Referencia / Nota"] = "Orden Binance"
+
+          # Unir
+          st.session_state["transacciones"] = pd.concat(
+              [st.session_state["transacciones"], df_binance],
+              ignore_index=True,
+          )
+          st.success(
+              f"¡Se importaron {len(df_binance)} operaciones con éxito!"
+          )
+          st.rerun()
 
     except Exception as e:
-      st.error(
-          "Error al procesar el archivo. Asegúrate de que es un archivo válido"
-          f" de Binance. Detalle: {e}"
-      )
+      st.error(f"Error al procesar el archivo: {e}")
 
 # ==========================================
 # TAB 3: RESUMEN CONTABLE Y CAJA

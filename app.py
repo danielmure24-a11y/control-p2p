@@ -20,13 +20,25 @@ hide_streamlit_style = """
 st.markdown(hide_streamlit_style, unsafe_allow_html=True)
 
 # ==========================================
-# 👥 CONFIGURACIÓN DE USUARIOS Y CONTRASEÑAS
+# 👥 GESTIÓN DE USUARIOS Y REGISTRO
 # ==========================================
-# Puedes agregar tantos usuarios como quieras con el formato: "usuario": "contraseña"
-USUARIOS = {
-    "daniel": "1234",
-    "invitado": "abcd",  # Puedes cambiar o agregar más aquí
-}
+USUARIOS_FILE = "usuarios.json"
+
+
+def cargar_usuarios():
+  if os.path.exists(USUARIOS_FILE):
+    try:
+      with open(USUARIOS_FILE, "r") as f:
+        return json.load(f)
+    except Exception:
+      pass
+  # Usuario predeterminado inicial por si no existe el archivo
+  return {"daniel": "1234"}
+
+
+def guardar_usuarios(usuarios):
+  with open(USUARIOS_FILE, "w") as f:
+    json.dump(usuarios, f)
 
 
 def verificar_login():
@@ -34,26 +46,64 @@ def verificar_login():
     st.session_state["usuario_actual"] = None
 
   if st.session_state["usuario_actual"] is None:
-    st.title("🔒 Control P2P - Acceso Independiente")
-    st.caption("Ingresa tu usuario y contraseña para acceder a tu cuenta.")
+    st.title("🔒 Control P2P - Acceso y Registro")
+    st.caption(
+        "Inicia sesión con tu cuenta o crea una nueva para empezar a registrar."
+    )
 
-    with st.form("form_login"):
-      usuario_ingresado = (
-          st.text_input("Usuario").strip().lower()
-      )  # Convierte a minúsculas para evitar errores
-      password_ingresado = st.text_input("Contraseña", type="password")
-      submitted = st.form_submit_button("Ingresar", use_container_width=True)
+    tab_login, tab_registro = st.tabs(["🔑 Iniciar Sesión", "📝 Crear Cuenta"])
 
-      if submitted:
-        if (
-            usuario_ingresado in USUARIOS
-            and USUARIOS[usuario_ingresado] == password_ingresado
-        ):
-          st.session_state["usuario_actual"] = usuario_ingresado
-          st.success(f"¡Bienvenido, {usuario_ingresado}!")
-          st.rerun()
-        else:
-          st.error("❌ Usuario o contraseña incorrectos.")
+    with tab_login:
+      with st.form("form_login"):
+        usuario_ingresado = st.text_input("Usuario").strip().lower()
+        password_ingresado = st.text_input("Contraseña", type="password")
+        submitted = st.form_submit_button("Ingresar", use_container_width=True)
+
+        if submitted:
+          usuarios = cargar_usuarios()
+          if (
+              usuario_ingresado in usuarios
+              and usuarios[usuario_ingresado] == password_ingresado
+          ):
+            st.session_state["usuario_actual"] = usuario_ingresado
+            st.success(f"¡Bienvenido, {usuario_ingresado}!")
+            st.rerun()
+          else:
+            st.error("❌ Usuario o contraseña incorrectos.")
+
+    with tab_registro:
+      with st.form("form_registro"):
+        nuevo_usuario = st.text_input("Elige un Nombre de Usuario").strip().lower()
+        nuevo_password = st.text_input(
+            "Elige una Contraseña", type="password"
+        )
+        conf_password = st.text_input(
+            "Confirma tu Contraseña", type="password"
+        )
+        sub_registro = st.form_submit_button(
+            "Registrarse", use_container_width=True
+        )
+
+        if sub_registro:
+          if not nuevo_usuario or not nuevo_password:
+            st.error("Por favor completa todos los campos.")
+          elif nuevo_password != conf_password:
+            st.error("❌ Las contraseñas no coinciden.")
+          else:
+            usuarios = cargar_usuarios()
+            if nuevo_usuario in usuarios:
+              st.error(
+                  "⚠️ Este nombre de usuario ya existe. Elige otro o inicia"
+                  " sesión."
+              )
+            else:
+              usuarios[nuevo_usuario] = nuevo_password
+              guardar_usuarios(usuarios)
+              st.success(
+                  "🎉 ¡Cuenta creada con éxito! Ve a la pestaña 'Iniciar Sesión'"
+                  " para entrar."
+              )
+
     return False
   return True
 
@@ -66,7 +116,7 @@ if not verificar_login():
 # 📂 CONFIGURACIÓN DE DATOS INDEPENDIENTES
 # ==========================================
 usuario_actual = st.session_state["usuario_actual"]
-# Cada usuario tendrá su propio archivo JSON independiente en la nube
+# Cada usuario tiene su propio archivo JSON de transacciones independiente
 DB_FILE = f"registros_{usuario_actual}.json"
 
 
